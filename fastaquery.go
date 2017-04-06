@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"flag"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -64,6 +65,11 @@ func searchSequence(content string, hash map[uint32][]QueryPos, sequence_name st
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: fastaquery queries.fq.gz genome.fa [genome.fa...]\n")
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
 	sequences_filename := os.Args[1]
 	fmt.Fprintf(os.Stderr, "%s: processing: %s\n", time.Now().String(), sequences_filename)
 
