@@ -23,3 +23,6 @@ e.g.
 * look for matching hash
 * check that rest of sequence matches
 
+### Installation
+
+* download the binaries from the releases tab on github.
