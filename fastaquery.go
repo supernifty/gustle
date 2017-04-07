@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	SEED_SIZE = 16
+	DEFAULT_SEED_SIZE = 16
 )
 
 func check_result(e error) {
@@ -35,10 +35,14 @@ func string_to_hash(s string) uint32 {
 	return h.Sum32()
 }
 
-func addSequence(content string, sequence int, hash map[uint32][]QueryPos) {
+func addSequence(content string, sequence int, hash map[uint32][]QueryPos, seed_size int) {
 	// for an exact match we only have to hash the start of the query
+	if len(content) < seed_size {
+		fmt.Fprintf(os.Stderr, "%s: WARN: sequence %v is length %v, shorter than seed size %v\n", time.Now().String(), sequence, len(content), seed_size)
+		return
+	}
 	position := 0
-	kmer := content[position : position+SEED_SIZE]
+	kmer := content[position : position+seed_size]
 	kmer_hash := string_to_hash(kmer)
 	entry := QueryPos{name: sequence, pos: position, content: content}
 	query, ok := hash[kmer_hash]
@@ -49,9 +53,9 @@ func addSequence(content string, sequence int, hash map[uint32][]QueryPos) {
 	hash[kmer_hash] = query
 }
 
-func searchSequence(content string, hash map[uint32][]QueryPos, sequence_name string, genome_filename string, sequence_names []string) {
-	for position := 0; position <= len(content)-SEED_SIZE; position += 1 {
-		kmer := content[position : position+SEED_SIZE]
+func searchSequence(content string, hash map[uint32][]QueryPos, sequence_name string, genome_filename string, sequence_names []string, seed_size int) {
+	for position := 0; position <= len(content)-seed_size; position += 1 {
+		kmer := content[position : position+seed_size]
 		kmer_hash := string_to_hash(kmer)
 		query, ok := hash[kmer_hash]
 		if ok {
@@ -65,13 +69,18 @@ func searchSequence(content string, hash map[uint32][]QueryPos, sequence_name st
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: fastaquery queries.fq.gz genome.fa [genome.fa...]\n")
+	var seed_size int
+	var mismatches int
+	flag.IntVar(&seed_size, "readlength", 16, "minimum read length of queries (16)")
+	flag.IntVar(&mismatches, "mismatches", 0, "mismatches to include (0)")
+	flag.Parse()
+	if !flag.Parsed() || flag.NArg() < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: fastaquery [-readlength min_readlength] [-mismatches mismatches] queries.fq.gz genome.fa [genome.fa...]\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
-	sequences_filename := os.Args[1]
-	fmt.Fprintf(os.Stderr, "%s: processing: %s\n", time.Now().String(), sequences_filename)
+	sequences_filename := flag.Arg(0)
+	fmt.Fprintf(os.Stderr, "%s: processing with seed size %v and up to %v mismatches: %s\n", time.Now().String(), seed_size, mismatches, sequences_filename)
 
 	file, err := os.Open(sequences_filename)
 	check_result(err)
@@ -93,7 +102,7 @@ func main() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, ">") {
 			if content != nil {
-				addSequence(content.String(), sequence_count-1, query_kmers)
+				addSequence(content.String(), sequence_count-1, query_kmers, seed_size)
 			}
 			sequence_names = append(sequence_names, line[1:])
 			sequence_count++
@@ -107,12 +116,12 @@ func main() {
 			// debug.FreeOSMemory()
 		}
 	}
-	addSequence(content.String(), sequence_count-1, query_kmers)
+	addSequence(content.String(), sequence_count-1, query_kmers, seed_size)
 	fmt.Fprintf(os.Stderr, "%s: done processing: %s: %v lines %v sequences.\n", time.Now().String(), sequences_filename, lines, len(sequence_names))
 
 	// process each genome - list matching sequences
 	fmt.Fprintf(os.Stdout, "Genome\tGenomeContig\tQueryContig\tGenomePosition\n")
-	for _, genome_filename := range os.Args[2:] {
+	for _, genome_filename := range flag.Args()[1:] {
 		fmt.Fprintf(os.Stderr, "%s: processing genome: %s\n", time.Now().String(), genome_filename)
 		file, err := os.Open(genome_filename)
 		check_result(err)
@@ -128,7 +137,7 @@ func main() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, ">") {
 				if content != nil {
-					searchSequence(content.String(), query_kmers, sequence_name, genome_filename, sequence_names)
+					searchSequence(content.String(), query_kmers, sequence_name, genome_filename, sequence_names, seed_size)
 				}
 				sequence_name = line[1:]
 				sequence_count++
@@ -138,7 +147,7 @@ func main() {
 			}
 			lines++
 		}
-		searchSequence(content.String(), query_kmers, sequence_name, genome_filename, sequence_names)
+		searchSequence(content.String(), query_kmers, sequence_name, genome_filename, sequence_names, seed_size)
 		fmt.Fprintf(os.Stderr, "%s: done genome: %s. %v lines. %v sequences.\n", time.Now().String(), genome_filename, lines, sequence_count)
 	}
 }
