@@ -7,7 +7,7 @@ finds exact matches for the fasta sequence in each genome.
 ### Usage
 
 ```
-fastaquery sequences.fa.gz genome.fa genome2.fa ...
+fastaquery [--readlength rl --mismatches mm] sequences.fa.gz genome.fa genome2.fa ...
 ```
 
 e.g.
