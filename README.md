@@ -15,6 +15,11 @@ e.g.
 ./fastaquery data/test_query.fa.gz data/test_genome.fa data/test_genome_2.fa
 ```
 
+### Output
+Genome filename: name of input file
+Gene: allele gene name
+Count: number of exactly matching alleles
+Alleles: comma separated list of exactly matching alleles
 
 ### Implementation
 
