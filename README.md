@@ -32,21 +32,24 @@ e.g.
 ```
 
 ### Output Format
-Genome filename: name of input file
-Gene: allele gene name
-Count: number of exactly matching alleles
-Alleles: comma separated list of exactly matching alleles
+The output is TSV, one line per genome.
+Each line contains the following columns:
+* Genome filename
+* cgST
+* Each gene name. Each allele in the gene that are present in the genome will be listed here. If no alleles for that gene are present, "N" is shown.
+
+The gene names are the sorted list of genes in alleles.fq.gz, unless a CGST file is specified, in which case the list of genes is taken from that file.
 
 ### Implementation
 
-* hash the first 16 bases of each sequence
-* iterate over each genome
-* look for matching hash
-* check that rest of sequence matches
+* Hash the first 16 bases of each sequence
+* Iterate over each genome
+* Look for matching hash
+* Check that rest of sequence matches
 
 ### Installation
 
-* download the binaries from the releases tab on github.
+* Download the binaries from the releases tab on github.
 
 ### Authors
 
