@@ -1,21 +1,37 @@
 
-## fastaquery
+## gustle
 
 Given a set of fasta sequences and a set of genomes, 
 finds exact matches for the fasta sequence in each genome.
 
 ### Usage
 
+List all available organisms for gMLST:
 ```
-fastaquery [--readlength rl --mismatches mm] sequences.fa.gz genome.fa genome2.fa ...
+gustle list
+```
+
+Specify organisms to download or update (downloads set of sequences and cgST definitions):
+```
+gustle get organism1 [organism2...]
+```
+
+Index specified organisms:
+```
+gustle index organism1 [organism2...]
+```
+
+Perform gMLST genotyping with the specified genome FASTA file against the specified organism:
+```
+gustle genotype [--readlength rl --mismatches mm --cgst cgst_file] alleles.fq.gz genome1.fa [genome2.fa...]
 ```
 
 e.g.
 ```
-./fastaquery data/test_query.fa.gz data/test_genome.fa data/test_genome_2.fa
+./gustle genotype data/test_query.fa.gz data/test_genome.fa data/test_genome_2.fa
 ```
 
-### Output
+### Output Format
 Genome filename: name of input file
 Gene: allele gene name
 Count: number of exactly matching alleles
@@ -31,3 +47,9 @@ Alleles: comma separated list of exactly matching alleles
 ### Installation
 
 * download the binaries from the releases tab on github.
+
+### Authors
+
+* Peter Georgeson
+* Torsten Seemann
+* Bernie Pope
