@@ -29,6 +29,7 @@ gustle genotype [--readlength rl --mismatches mm --cgst cgst_file] alleles.fq.gz
 e.g.
 ```
 ./gustle genotype data/test_query.fa.gz data/test_genome.fa data/test_genome_2.fa
+./gustle genotype -cgst data/test.cgst data/test_query.fa.gz data/test_cgst.fa
 ```
 
 ### Output Format
@@ -56,3 +57,9 @@ The gene names are the sorted list of genes in alleles.fq.gz, unless a CGST file
 * Peter Georgeson
 * Torsten Seemann
 * Bernie Pope
+
+### TODO
+* command line argument for dealing with missing alleles N or 0?
+* populate cgst
+* list, get, index subcommands
+* tests
