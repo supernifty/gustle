@@ -1,4 +1,4 @@
-go build gustle.go
+go build *.go
 cp gustle gustle_osx
-GOOS=linux go build gustle.go
+GOOS=linux go build *.go
 cp gustle gustle_linux
