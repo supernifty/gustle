@@ -4,26 +4,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
+	"github.com/supernifty/gustle/cgmlst"
 	"os"
-	"time"
 )
 
 const (
 	VERSION           = "0.1"
 	DEFAULT_SEED_SIZE = 16
-	NO_CGST           = "NA"
 )
-
-func checkResult(e error) {
-	if e != nil {
-		log.Fatal(e)
-	}
-}
-
-func logm(level string, msg string) {
-	fmt.Fprintf(os.Stderr, "%s: %s: %s\n", time.Now().String(), level, msg)
-}
 
 func showUsage() {
 	fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle [list|get|index|genotype|version] [subcommand arguments]\n", VERSION)
@@ -48,26 +36,42 @@ func get(args []string) {
 
 // indexes an organism
 func index(args []string) {
-	fmt.Fprintf(os.Stderr, "index: TODO\n")
+	indexCommand := flag.NewFlagSet("index", flag.ExitOnError)
+	var seedSize int
+	var verbose bool
+	indexCommand.IntVar(&seedSize, "readlength", 16, "minimum read length of queries (16)")
+	indexCommand.BoolVar(&verbose, "verbose", false, "include additional logging")
+	indexCommand.Parse(args)
+	if !indexCommand.Parsed() || indexCommand.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle index queries.fa.gz\n", VERSION)
+		os.Exit(1)
+	}
+	sequencesFilename := indexCommand.Arg(0)
+	var sequenceNames []string
+	var geneNames map[string]bool = make(map[string]bool)
+	// queryKmers := genotype.IndexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize, verbose)
+	genotype.IndexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize, verbose)
 }
 
 // genotype finds matching alleles on a specified genome
-func genotype(args []string) {
+func doGenotype(args []string) {
 	genotypeCommand := flag.NewFlagSet("genotype", flag.ExitOnError)
 	var seedSize int
 	var mismatches int
 	var cgst string
+	var verbose bool
 	genotypeCommand.IntVar(&seedSize, "readlength", 16, "minimum read length of queries (16)")
 	genotypeCommand.IntVar(&mismatches, "mismatches", 0, "mismatches to include (0)")
 	genotypeCommand.StringVar(&cgst, "cgst", "", "cgST file")
+	genotypeCommand.BoolVar(&verbose, "verbose", false, "include additional logging")
 	genotypeCommand.Parse(args)
 	if !genotypeCommand.Parsed() || genotypeCommand.NArg() < 2 {
-		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle genotype [-kmer kmer -mismatches mismatches -cgst cgst_file] queries.fa.gz genome.fa [genome.fa...]\n", VERSION)
+		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle genotype [-kmer kmer -mismatches mismatches -cgst cgst_file -verbose] queries.fa.gz genome.fa [genome.fa...]\n", VERSION)
 		os.Exit(1)
 	}
 	sequencesFilename := genotypeCommand.Arg(0)
 
-	findAlleles(seedSize, mismatches, cgst, sequencesFilename, genotypeCommand.Args()[1:])
+	genotype.FindAlleles(seedSize, mismatches, cgst, sequencesFilename, genotypeCommand.Args()[1:], verbose)
 }
 
 func main() {
@@ -84,7 +88,7 @@ func main() {
 	case "index":
 		index(os.Args[2:])
 	case "genotype":
-		genotype(os.Args[2:])
+		doGenotype(os.Args[2:])
 	case "version":
 		version()
 	default:

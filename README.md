@@ -16,9 +16,9 @@ Specify organisms to download or update (downloads set of sequences and cgST def
 gustle get organism1 [organism2...]
 ```
 
-Index specified organisms:
+Index specified organisms (writes alleles.fq.gz.gus):
 ```
-gustle index organism1 [organism2...]
+gustle index alleles.fq.gz 
 ```
 
 Perform gMLST genotyping with the specified genome FASTA file against the specified organism:

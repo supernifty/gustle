@@ -1,4 +1,8 @@
-package main
+package genotype
+
+//
+// this package implements
+//
 
 import (
 	"bufio"
@@ -10,21 +14,31 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
+const (
+	NO_CGST = "NA"
+)
+
+// QueryIndex maps hashes of kmers to all possible source locations
+type QueryIndex map[uint32][]QueryPos
+
+// QueryPos provides an index into a sequence name, and a position
 type QueryPos struct {
 	name    int    // array index to name of query
 	pos     int    // position of kmer in query
 	content string // entire query sequence
 }
 
-type QueryIndex map[uint32][]QueryPos
+// Allele is names a short sequence
+type GeneName string
 
-// AlleleResult is a list of matching alleles
+// AlleleResult is a list of allele names
 type AlleleResult map[string]bool
 
-// maps gene to list of matching alleles
-type GenomeAlleleResult map[string]AlleleResult
+// GenomeAlleleResult maps gene to list of allele names
+type GenomeAlleleResult map[GeneName]AlleleResult
 
 // stringToHash gives a 32-bit hash of a string
 func stringToHash(s string) uint32 {
@@ -33,6 +47,19 @@ func stringToHash(s string) uint32 {
 	return h.Sum32()
 }
 
+func logm(level string, msg string, verbose bool) {
+	if verbose || level != "DEBUG" {
+		fmt.Fprintf(os.Stderr, "%s: %s: %s\n", time.Now().String(), level, msg)
+	}
+}
+
+func checkResult(e error) {
+	if e != nil {
+		log.Fatal(e)
+	}
+}
+
+// joinAlleles takes a list of alleles and returns a comma separated list of them
 func joinAlleles(alleles AlleleResult) string {
 	keys := make([]string, 0, len(alleles))
 	for k := range alleles {
@@ -41,7 +68,7 @@ func joinAlleles(alleles AlleleResult) string {
 	return strings.Join(keys, ",")
 }
 
-// reverse complements a single byte
+// reverse complements a single nucleotide
 func reverse(in byte) byte {
 	result, ok := REVERSE_MAP[in]
 	if !ok {
@@ -63,50 +90,53 @@ func reverseComplement(in *bytes.Buffer) []byte {
 	return result
 }
 
-// addSequence adds a sequence to a kmer hash
-func addSequence(content string, sequence int, hash map[uint32][]QueryPos, seedSize int) {
+// addSearchableSequence adds an allele sequence to the hash
+func addSearchableSequence(content string, sequence int, db QueryIndex, seedSize int) {
 	// for an exact match we only have to hash the start of the query
 	if len(content) < seedSize {
-		logm("WARN", fmt.Sprintf("sequence %v is length %v, shorter than seed size %v", sequence, len(content), seedSize))
+		logm("WARN", fmt.Sprintf("sequence %v is length %v, shorter than seed size %v", sequence, len(content), seedSize), false)
 		return
 	}
 	position := 0
 	kmer := content[position : position+seedSize]
 	kmerHash := stringToHash(kmer)
 	entry := QueryPos{name: sequence, pos: position, content: content}
-	query, ok := hash[kmerHash]
+	query, ok := db[kmerHash]
 	if !ok {
 		query = make([]QueryPos, 0)
 	}
 	query = append(query, entry)
-	hash[kmerHash] = query
+	db[kmerHash] = query
 }
 
-func searchSequence(content string, hash map[uint32][]QueryPos, sequenceName string, genomeFilename string, sequenceNames []string, seedSize int, result GenomeAlleleResult) {
+// searchSequence iterates over content and populates result with genes and matching
+func searchSequence(content string, db QueryIndex, sequenceNames []string, seedSize int, result GenomeAlleleResult, verbose bool) {
 	// populates result with a map from gene name to list of found alleles
 	for position := 0; position <= len(content)-seedSize; position += 1 {
-		kmer := content[position : position+seedSize]
+		kmer := content[position : position+seedSize] // kmer at curreent position in content
 		kmerHash := stringToHash(kmer)
-		query, ok := hash[kmerHash]
+		query, ok := db[kmerHash]
 		if ok {
 			for _, candidate := range query {
 				// check for a match
-				if position+len(candidate.content) <= len(content) && content[position:position+len(candidate.content)] == candidate.content {
-					// it's a match, add to result
+				if position-candidate.pos >= 0 && position-candidate.pos+len(candidate.content) <= len(content) && content[position-candidate.pos:position-candidate.pos+len(candidate.content)] == candidate.content {
+					// it's a match, split the sequence name into gene and allele
 					geneAllele := strings.Split(sequenceNames[candidate.name], "_")
-					alleles, ok := result[geneAllele[0]]
+					alleles, ok := result[GeneName(geneAllele[0])]
 					if !ok {
 						alleles = make(AlleleResult, 0)
 					}
 					alleles[geneAllele[1]] = true
-					result[geneAllele[0]] = alleles
+					logm("DEBUG", fmt.Sprintf("%s found at %v", sequenceNames[candidate.name], position-candidate.pos), verbose)
+					result[GeneName(geneAllele[0])] = alleles
 				}
 			}
 		}
 	}
 }
 
-func indexSequences(sequencesFilename string, sequenceNames *[]string, geneNames map[string]bool, seedSize int) QueryIndex {
+func IndexSequences(sequencesFilename string, sequenceNames *[]string, geneNames map[string]bool, seedSize int, verbose bool) QueryIndex {
+	logm("INFO", fmt.Sprintf("processing with seed size %v: %s", seedSize, sequencesFilename), verbose)
 	var queryKmers QueryIndex = make(QueryIndex)
 	var content *bytes.Buffer
 
@@ -128,7 +158,7 @@ func indexSequences(sequencesFilename string, sequenceNames *[]string, geneNames
 		line := scanner.Text()
 		if strings.HasPrefix(line, ">") {
 			if content != nil {
-				addSequence(content.String(), sequenceCount-1, queryKmers, seedSize)
+				addSearchableSequence(content.String(), sequenceCount-1, queryKmers, seedSize)
 			}
 			*sequenceNames = append(*sequenceNames, line[1:])
 			sequenceCount++
@@ -143,22 +173,20 @@ func indexSequences(sequencesFilename string, sequenceNames *[]string, geneNames
 		}
 		lines++
 		if lines%1000000 == 0 {
-			logm("INFO", fmt.Sprintf("processing: %s: %v lines %v sequences. %v kmers", sequencesFilename, lines, len(*sequenceNames), len(queryKmers)))
+			logm("INFO", fmt.Sprintf("processing: %s: %v lines %v sequences. %v kmers", sequencesFilename, lines, len(*sequenceNames), len(queryKmers)), false)
 		}
 	}
-	addSequence(content.String(), sequenceCount-1, queryKmers, seedSize)
+	addSearchableSequence(content.String(), sequenceCount-1, queryKmers, seedSize)
 
+	logm("INFO", fmt.Sprintf("done processing: %s: %v sequences.", sequencesFilename, len(*sequenceNames)), verbose)
 	return queryKmers
 }
 
-// findAlleles finds alleles that match a genome and generates cgst information
-func findAlleles(seedSize int, mismatches int, cgst string, sequencesFilename string, genomes []string) {
-	logm("INFO", fmt.Sprintf("processing with seed size %v, up to %v mismatches, cgst: %s: %s", seedSize, mismatches, cgst, sequencesFilename))
+// FindAlleles finds alleles that match a genome and generates cgst information
+func FindAlleles(seedSize int, mismatches int, cgst string, sequencesFilename string, genomes []string, verbose bool) {
 	var sequenceNames []string
 	var geneNames map[string]bool = make(map[string]bool)
-	queryKmers := indexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize)
-
-	logm("INFO", fmt.Sprintf("done processing: %s: %v sequences.", sequencesFilename, len(sequenceNames)))
+	queryKmers := IndexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize, verbose)
 
 	var cgstGeneNames = make([]string, 0, len(geneNames))
 	var cgstIds map[uint32]string = make(map[uint32]string)
@@ -190,7 +218,7 @@ func findAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 			}
 			lines++
 		}
-		logm("INFO", fmt.Sprintf("done processing: %s: %v lines %v sequences.", cgst, lines, len(sequenceNames)))
+		logm("INFO", fmt.Sprintf("done processing: %s: %v lines %v sequences.", cgst, lines, len(sequenceNames)), verbose)
 	}
 
 	// genotype each genome - list matching sequences
@@ -200,7 +228,7 @@ func findAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 	var content *bytes.Buffer
 
 	for _, genomeFilename := range genomes {
-		logm("INFO", fmt.Sprintf("processing genome: %s", genomeFilename))
+		logm("INFO", fmt.Sprintf("processing genome: %s", genomeFilename), verbose)
 		var result GenomeAlleleResult = make(GenomeAlleleResult)
 		file, err := os.Open(genomeFilename)
 		checkResult(err)
@@ -211,15 +239,13 @@ func findAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 		content = new(bytes.Buffer)
 		r := bufio.NewReader(file)
 		scanner := bufio.NewScanner(r)
-		var sequenceName string
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, ">") {
 				if content != nil {
-					searchSequence(content.String(), queryKmers, sequenceName, genomeFilename, sequenceNames, seedSize, result)
-					searchSequence(string(reverseComplement(content)), queryKmers, sequenceName, genomeFilename, sequenceNames, seedSize, result)
+					searchSequence(content.String(), queryKmers, sequenceNames, seedSize, result, verbose)
+					searchSequence(string(reverseComplement(content)), queryKmers, sequenceNames, seedSize, result, verbose)
 				}
-				sequenceName = line[1:]
 				sequenceCount++
 				content = new(bytes.Buffer)
 			} else {
@@ -227,9 +253,9 @@ func findAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 			}
 			lines++
 		}
-		searchSequence(content.String(), queryKmers, sequenceName, genomeFilename, sequenceNames, seedSize, result)
-		searchSequence(string(reverseComplement(content)), queryKmers, sequenceName, genomeFilename, sequenceNames, seedSize, result)
-		logm("INFO", fmt.Sprintf("done genome: %s. %v lines. %v sequences.", genomeFilename, lines, sequenceCount))
+		searchSequence(content.String(), queryKmers, sequenceNames, seedSize, result, verbose)
+		searchSequence(string(reverseComplement(content)), queryKmers, sequenceNames, seedSize, result, verbose)
+		logm("INFO", fmt.Sprintf("done genome: %s. %v lines. %v sequences.", genomeFilename, lines, sequenceCount), verbose)
 		writeResults(genomeFilename, result, geneNames, cgstGeneNames, cgstIds)
 	}
 }
@@ -237,7 +263,7 @@ func findAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 func writeResults(filename string, result GenomeAlleleResult, geneNames map[string]bool, cgstGeneNames []string, cgstIds map[uint32]string) {
 	genomeAlleles := make([]string, 0, len(cgstGeneNames))
 	for _, gene := range cgstGeneNames {
-		alleles, ok := result[gene]
+		alleles, ok := result[GeneName(gene)]
 		if ok {
 			genomeAlleles = append(genomeAlleles, joinAlleles(alleles))
 		} else {
