@@ -35,43 +35,43 @@ func get(args []string) {
 }
 
 // indexes an organism
+// gustle index --output x --cgst cgst inputs
 func index(args []string) {
 	indexCommand := flag.NewFlagSet("index", flag.ExitOnError)
 	var seedSize int
 	var verbose bool
+	var cgst string
+	var output string
 	indexCommand.IntVar(&seedSize, "readlength", 16, "minimum read length of queries (16)")
 	indexCommand.BoolVar(&verbose, "verbose", false, "include additional logging")
+	indexCommand.StringVar(&cgst, "cgst", "", "cgST input file")
+	indexCommand.StringVar(&output, "output", "", "write index to this file")
 	indexCommand.Parse(args)
-	if !indexCommand.Parsed() || indexCommand.NArg() < 1 {
-		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle index queries.fa.gz\n", VERSION)
+	if !indexCommand.Parsed() || cgst == "" || indexCommand.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle index --output output_file --cgst cgst_file queries.fa.gz [queries.fa.gz...]\n", VERSION)
 		os.Exit(1)
 	}
-	sequencesFilename := indexCommand.Arg(0)
-	var sequenceNames []string
-	var geneNames map[string]bool = make(map[string]bool)
-	// queryKmers := genotype.IndexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize, verbose)
-	genotype.IndexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize, verbose)
+	db := genotype.IndexSequences(indexCommand.Args(), cgst, seedSize, verbose)
+	genotype.SaveIndex(output, db, verbose)
 }
 
 // genotype finds matching alleles on a specified genome
 func doGenotype(args []string) {
 	genotypeCommand := flag.NewFlagSet("genotype", flag.ExitOnError)
-	var seedSize int
 	var mismatches int
-	var cgst string
 	var verbose bool
-	genotypeCommand.IntVar(&seedSize, "readlength", 16, "minimum read length of queries (16)")
+	var index string
 	genotypeCommand.IntVar(&mismatches, "mismatches", 0, "mismatches to include (0)")
-	genotypeCommand.StringVar(&cgst, "cgst", "", "cgST file")
 	genotypeCommand.BoolVar(&verbose, "verbose", false, "include additional logging")
+	genotypeCommand.StringVar(&index, "index", "", "index file")
 	genotypeCommand.Parse(args)
-	if !genotypeCommand.Parsed() || genotypeCommand.NArg() < 2 {
-		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle genotype [-kmer kmer -mismatches mismatches -cgst cgst_file -verbose] queries.fa.gz genome.fa [genome.fa...]\n", VERSION)
+	if !genotypeCommand.Parsed() || index == "" || genotypeCommand.NArg() < 1 {
+		fmt.Fprintf(os.Stderr, "gustle version %v\nUsage: gustle genotype [-mismatches mismatches -verbose] --index index_file genome.fa [genome.fa...]\n", VERSION)
 		os.Exit(1)
 	}
-	sequencesFilename := genotypeCommand.Arg(0)
 
-	genotype.FindAlleles(seedSize, mismatches, cgst, sequencesFilename, genotypeCommand.Args()[1:], verbose)
+	var db genotype.QueryList = genotype.LoadIndex(index, verbose)
+	genotype.FindAlleles(db, mismatches, genotypeCommand.Args(), verbose)
 }
 
 func main() {

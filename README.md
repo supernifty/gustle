@@ -18,18 +18,18 @@ gustle get organism1 [organism2...]
 
 Index specified organisms (writes alleles.fq.gz.gus):
 ```
-gustle index alleles.fq.gz 
+gustle index --output alleles.gus alleles.fq.gz 
 ```
 
 Perform gMLST genotyping with the specified genome FASTA file against the specified organism:
 ```
-gustle genotype [--readlength rl --mismatches mm --cgst cgst_file] alleles.fq.gz genome1.fa [genome2.fa...]
+gustle genotype [--cgst cgst_file --verbose] --index alleles.gus genome1.fa [genome2.fa...]
 ```
 
 e.g.
 ```
-./gustle genotype data/test_query.fa.gz data/test_genome.fa data/test_genome_2.fa
-./gustle genotype -cgst data/test.cgst data/test_query.fa.gz data/test_cgst.fa
+./gustle index --output data/test_query.gus data/test_query.fa.gz 
+./gustle genotype --cgst data/test.cgst --index data/test_query.gus data/test_cgst.fa
 ```
 
 ### Output Format

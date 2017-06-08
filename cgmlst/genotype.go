@@ -8,11 +8,11 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"encoding/gob"
 	"fmt"
 	"hash/fnv"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"time"
 )
@@ -21,17 +21,25 @@ const (
 	NO_CGST = "NA"
 )
 
+// QueryList contains indexed queries and the names of all sequences
+type QueryList struct {
+	Index QueryIndex
+	Names []string // list of query fasta names
+	SeedSize int
+	Cgst CGST
+}
+
 // QueryIndex maps hashes of kmers to all possible source locations
 type QueryIndex map[uint32][]QueryPos
 
 // QueryPos provides an index into a sequence name, and a position
 type QueryPos struct {
-	name    int    // array index to name of query
-	pos     int    // position of kmer in query
-	content string // entire query sequence
+	Name    int    // array index to name of query
+	Pos     int    // position of kmer in query
+	Content string // entire query sequence
 }
 
-// Allele is names a short sequence
+// GeneName names a short sequence
 type GeneName string
 
 // AlleleResult is a list of allele names
@@ -91,57 +99,165 @@ func reverseComplement(in *bytes.Buffer) []byte {
 }
 
 // addSearchableSequence adds an allele sequence to the hash
-func addSearchableSequence(content string, sequence int, db QueryIndex, seedSize int) {
+func addSearchableSequence(content string, sequence int, db QueryList) {
 	// for an exact match we only have to hash the start of the query
-	if len(content) < seedSize {
-		logm("WARN", fmt.Sprintf("sequence %v is length %v, shorter than seed size %v", sequence, len(content), seedSize), false)
+	if len(content) < db.SeedSize {
+		logm("WARN", fmt.Sprintf("sequence %v is length %v, shorter than seed size %v", sequence, len(content), db.SeedSize), false)
 		return
 	}
 	position := 0
-	kmer := content[position : position+seedSize]
+	kmer := content[position : position+db.SeedSize]
 	kmerHash := stringToHash(kmer)
-	entry := QueryPos{name: sequence, pos: position, content: content}
-	query, ok := db[kmerHash]
+	entry := QueryPos{Name: sequence, Pos: position, Content: content}
+	query, ok := db.Index[kmerHash]
 	if !ok {
 		query = make([]QueryPos, 0)
 	}
 	query = append(query, entry)
-	db[kmerHash] = query
+	db.Index[kmerHash] = query
 }
 
 // searchSequence iterates over content and populates result with genes and matching
-func searchSequence(content string, db QueryIndex, sequenceNames []string, seedSize int, result GenomeAlleleResult, verbose bool) {
+func searchSequence(content string, db QueryList, result GenomeAlleleResult, verbose bool, reverseComplement bool) {
 	// populates result with a map from gene name to list of found alleles
-	for position := 0; position <= len(content)-seedSize; position += 1 {
-		kmer := content[position : position+seedSize] // kmer at curreent position in content
+	for position := 0; position <= len(content)-db.SeedSize; position += 1 {
+		kmer := content[position : position+db.SeedSize] // kmer at curreent position in content
 		kmerHash := stringToHash(kmer)
-		query, ok := db[kmerHash]
+		query, ok := db.Index[kmerHash]
 		if ok {
+			// logm("DEBUG", fmt.Sprintf("found %v potential locations for %s", len(query), content), verbose)
 			for _, candidate := range query {
 				// check for a match
-				if position-candidate.pos >= 0 && position-candidate.pos+len(candidate.content) <= len(content) && content[position-candidate.pos:position-candidate.pos+len(candidate.content)] == candidate.content {
+				if position-candidate.Pos >= 0 && position-candidate.Pos+len(candidate.Content) <= len(content) && content[position-candidate.Pos:position-candidate.Pos+len(candidate.Content)] == candidate.Content {
 					// it's a match, split the sequence name into gene and allele
-					geneAllele := strings.Split(sequenceNames[candidate.name], "_")
+					geneAllele := strings.Split(db.Names[candidate.Name], "_")
 					alleles, ok := result[GeneName(geneAllele[0])]
 					if !ok {
 						alleles = make(AlleleResult, 0)
 					}
 					alleles[geneAllele[1]] = true
-					logm("DEBUG", fmt.Sprintf("%s found at %v", sequenceNames[candidate.name], position-candidate.pos), verbose)
+					if reverseComplement {
+						logm("DEBUG", fmt.Sprintf("%s found at reverse complement -%v (%v)", db.Names[candidate.Name], position-candidate.Pos, len(content)-len(candidate.Content)-position+candidate.Pos), verbose)
+					} else {
+						logm("DEBUG", fmt.Sprintf("%s found at %v", db.Names[candidate.Name], position-candidate.Pos), verbose)
+					}
 					result[GeneName(geneAllele[0])] = alleles
+				} else {
+					// logm("DEBUG", fmt.Sprintf("didn't match %s", candidate.Content), verbose)
 				}
 			}
+		} else {
+			// logm("DEBUG", fmt.Sprintf("didn't find hash for %s", content), verbose)
 		}
 	}
 }
 
-func IndexSequences(sequencesFilename string, sequenceNames *[]string, geneNames map[string]bool, seedSize int, verbose bool) QueryIndex {
-	logm("INFO", fmt.Sprintf("processing with seed size %v: %s", seedSize, sequencesFilename), verbose)
-	var queryKmers QueryIndex = make(QueryIndex)
+// IndexSequences generates an index from a gzipped list of alleles for genotyping
+func IndexSequences(sequences []string, cgstFilename string, seedSize int, verbose bool) QueryList {
+	logm("INFO", fmt.Sprintf("processing with cgst file '%s', seed size %v: %v sequence file(s)", cgstFilename, seedSize, len(sequences)), verbose)
+	var queryList QueryList
+	queryList.SeedSize = seedSize
+	queryList.Index = make(QueryIndex)
+	queryList.Cgst = CreateCGST(cgstFilename, verbose)
 	var content *bytes.Buffer
 
+	lines := 0
+	sequenceCount := 0
+
+	for _, sequenceFilename := range sequences {
+		logm("INFO", fmt.Sprintf("processing '%s'...", sequenceFilename), verbose)
+		// open sequences (either .fa or .fa.gz) file for reading
+		file, err := os.Open(sequenceFilename)
+		checkResult(err)
+
+		var scanner *bufio.Scanner
+		if strings.HasSuffix(sequenceFilename, ".gz") {
+			gr, err := gzip.NewReader(file)
+			checkResult(err)
+			scanner = bufio.NewScanner(gr)
+		} else {
+			scanner = bufio.NewScanner(file)
+		}
+
+
+		// index sequences
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, ">") {
+				if content != nil {
+					addSearchableSequence(content.String(), sequenceCount-1, queryList)
+				}
+				queryList.Names = append(queryList.Names, line[1:])
+				sequenceCount++
+				content = new(bytes.Buffer)
+			} else {
+				(*content).WriteString(line)
+			}
+			lines++
+			if lines%1000000 == 0 {
+				logm("INFO", fmt.Sprintf("processing %s: %v lines %v sequences. %v kmers", sequenceFilename, lines, len(queryList.Names), len(queryList.Index)), false)
+			}
+		}
+		addSearchableSequence(content.String(), sequenceCount-1, queryList)
+		logm("INFO", fmt.Sprintf("processing '%s': done", sequenceFilename), verbose)
+
+		file.Close()
+	}
+
+	logm("INFO", fmt.Sprintf("processing %v file(s): done. %v sequences", len(sequences), len(queryList.Names)), verbose)
+	return queryList
+}
+
+// SaveIndex writes an indexed collection of indexes for use with the genotype command
+func SaveIndex(target string, source QueryList, verbose bool) {
+	logm("INFO", fmt.Sprintf("saving index to %s...", target), verbose)
+	file, err := os.Create(target)
+	checkResult(err)
+	defer file.Close()
+
+	gr := gzip.NewWriter(file)
+	defer gr.Close()
+
+	encoder := gob.NewEncoder(gr)
+
+	err = encoder.Encode(source.Names)
+	checkResult(err)
+	logm("INFO", fmt.Sprintf("%v sequence names saved", len(source.Names)), verbose)
+
+	err = encoder.Encode(source.SeedSize)
+	checkResult(err)
+
+	err = encoder.Encode(source.Cgst)
+	checkResult(err)
+
+	// save the index, but go has a size limit
+	indexSize := len(source.Index)
+	err = encoder.Encode(indexSize)
+	checkResult(err)
+	logm("INFO", fmt.Sprintf("%v queries to save...", indexSize), verbose)
+
+	count := 0
+	for key, value := range source.Index {
+		err = encoder.Encode(key)
+		checkResult(err)
+		err = encoder.Encode(value)
+		checkResult(err)
+		count++
+		if count%10000 == 0 {
+			logm("INFO", fmt.Sprintf("processing: saved %v items", count), false)
+		}
+	}
+
+	logm("INFO", fmt.Sprintf("saving index to %s: done", target), verbose)
+}
+
+func LoadIndex(source string, verbose bool) QueryList {
+	logm("INFO", fmt.Sprintf("loading index from %s...", source), verbose)
+
+	var result QueryList
+
 	// open fa.gz file
-	file, err := os.Open(sequencesFilename)
+	file, err := os.Open(source)
 	checkResult(err)
 	defer file.Close()
 
@@ -149,80 +265,51 @@ func IndexSequences(sequencesFilename string, sequenceNames *[]string, geneNames
 	checkResult(err)
 	defer gr.Close()
 
-	scanner := bufio.NewScanner(gr)
-	lines := 0
-	sequenceCount := 0
+	decoder := gob.NewDecoder(gr)
 
-	// index sequences
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, ">") {
-			if content != nil {
-				addSearchableSequence(content.String(), sequenceCount-1, queryKmers, seedSize)
-			}
-			*sequenceNames = append(*sequenceNames, line[1:])
-			sequenceCount++
-			content = new(bytes.Buffer)
-			geneName := strings.Split(line[1:], "_")[0]
-			_, ok := geneNames[geneName]
-			if !ok {
-				geneNames[geneName] = true
-			}
-		} else {
-			(*content).WriteString(line)
+	err = decoder.Decode(&result.Names)
+	checkResult(err)
+	logm("INFO", fmt.Sprintf("%v sequence names restored", len(result.Names)), verbose)
+
+	err = decoder.Decode(&result.SeedSize)
+	checkResult(err)
+
+	err = decoder.Decode(&result.Cgst)
+	checkResult(err)
+
+	var indexSize int
+	err = decoder.Decode(&indexSize)
+	checkResult(err)
+
+	result.Index = make(QueryIndex)
+
+	count := 0
+	for i := 0; i < indexSize; i++ {
+		var key uint32
+		var val []QueryPos
+		err = decoder.Decode(&key)
+		checkResult(err)
+		err = decoder.Decode(&val)
+		checkResult(err)
+		result.Index[key] = val
+		count++
+		if count%1000 == 0 {
+			logm("INFO", fmt.Sprintf("processing: loaded %v items", count), false)
 		}
-		lines++
-		if lines%1000000 == 0 {
-			logm("INFO", fmt.Sprintf("processing: %s: %v lines %v sequences. %v kmers", sequencesFilename, lines, len(*sequenceNames), len(queryKmers)), false)
-		}
+		// logm("DEBUG", fmt.Sprintf("last key: %v, values: %v", key, len(val)), verbose)
 	}
-	addSearchableSequence(content.String(), sequenceCount-1, queryKmers, seedSize)
 
-	logm("INFO", fmt.Sprintf("done processing: %s: %v sequences.", sequencesFilename, len(*sequenceNames)), verbose)
-	return queryKmers
+	logm("INFO", fmt.Sprintf("loading index from %s - loaded %v: done", source, len(result.Index)), verbose)
+
+	return result
 }
 
 // FindAlleles finds alleles that match a genome and generates cgst information
-func FindAlleles(seedSize int, mismatches int, cgst string, sequencesFilename string, genomes []string, verbose bool) {
-	var sequenceNames []string
-	var geneNames map[string]bool = make(map[string]bool)
-	queryKmers := IndexSequences(sequencesFilename, &sequenceNames, geneNames, seedSize, verbose)
-
-	var cgstGeneNames = make([]string, 0, len(geneNames))
-	var cgstIds map[uint32]string = make(map[uint32]string)
-	if cgst == "" {
-		// no cgst file provided
-		for gene := range geneNames {
-			cgstGeneNames = append(cgstGeneNames, gene)
-		}
-		sort.Strings(cgstGeneNames)
-	} else {
-		// read cgst details
-		file, err := os.Open(cgst)
-		checkResult(err)
-		defer file.Close()
-		r := bufio.NewReader(file)
-		scanner := bufio.NewScanner(r)
-		lines := 0
-		for scanner.Scan() {
-			if lines == 0 {
-				// first line contains the gene names
-				fields := strings.Split(scanner.Text(), "\t")
-				for _, gene := range fields[1:] {
-					cgstGeneNames = append(cgstGeneNames, gene)
-				}
-			} else {
-				fields := strings.SplitN(scanner.Text(), "\t", 2)
-				// subsequent lines are of the form id,allele_id1,...
-				cgstIds[stringToHash(fields[1])] = fields[0]
-			}
-			lines++
-		}
-		logm("INFO", fmt.Sprintf("done processing: %s: %v lines %v sequences.", cgst, lines, len(sequenceNames)), verbose)
-	}
+func FindAlleles(db QueryList, mismatches int, genomes []string, verbose bool) {
+	logm("INFO", "find alleles...", verbose)
 
 	// genotype each genome - list matching sequences
-	fmt.Fprintf(os.Stdout, "Filename\tcgST\t%v\n", strings.Join(cgstGeneNames, "\t"))
+	fmt.Fprintf(os.Stdout, "Filename\tcgST\t%v\n", strings.Join(db.Cgst.GeneNames, "\t"))
 	var lines int
 	var sequenceCount int
 	var content *bytes.Buffer
@@ -243,8 +330,8 @@ func FindAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 			line := scanner.Text()
 			if strings.HasPrefix(line, ">") {
 				if content != nil {
-					searchSequence(content.String(), queryKmers, sequenceNames, seedSize, result, verbose)
-					searchSequence(string(reverseComplement(content)), queryKmers, sequenceNames, seedSize, result, verbose)
+					searchSequence(content.String(), db, result, verbose, false)
+					searchSequence(string(reverseComplement(content)), db, result, verbose, true)
 				}
 				sequenceCount++
 				content = new(bytes.Buffer)
@@ -253,14 +340,15 @@ func FindAlleles(seedSize int, mismatches int, cgst string, sequencesFilename st
 			}
 			lines++
 		}
-		searchSequence(content.String(), queryKmers, sequenceNames, seedSize, result, verbose)
-		searchSequence(string(reverseComplement(content)), queryKmers, sequenceNames, seedSize, result, verbose)
+		searchSequence(content.String(), db, result, verbose, false)
+		searchSequence(string(reverseComplement(content)), db, result, verbose, true)
 		logm("INFO", fmt.Sprintf("done genome: %s. %v lines. %v sequences.", genomeFilename, lines, sequenceCount), verbose)
-		writeResults(genomeFilename, result, geneNames, cgstGeneNames, cgstIds)
+		writeResults(genomeFilename, result, db.Cgst.GeneNames, db.Cgst.Ids)
 	}
+	logm("INFO", "find alleles: done", verbose)
 }
 
-func writeResults(filename string, result GenomeAlleleResult, geneNames map[string]bool, cgstGeneNames []string, cgstIds map[uint32]string) {
+func writeResults(filename string, result GenomeAlleleResult, cgstGeneNames []string, cgstIds map[uint32]string) {
 	genomeAlleles := make([]string, 0, len(cgstGeneNames))
 	for _, gene := range cgstGeneNames {
 		alleles, ok := result[GeneName(gene)]
@@ -272,6 +360,7 @@ func writeResults(filename string, result GenomeAlleleResult, geneNames map[stri
 	}
 	alleles := strings.Join(genomeAlleles, "\t")
 	// see if it matches a cgstId
+	// TODO need more than just a perfect match
 	cgstId, ok := cgstIds[stringToHash(alleles)]
 	if !ok {
 		cgstId = NO_CGST
