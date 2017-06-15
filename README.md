@@ -23,13 +23,13 @@ gustle index --output alleles.gus alleles.fq.gz
 
 Perform gMLST genotyping with the specified genome FASTA file against the specified organism:
 ```
-gustle genotype [--cgst cgst_file --verbose] --index alleles.gus genome1.fa [genome2.fa...]
+gustle genotype [--verbose] --index alleles.gus genome1.fa [genome2.fa...]
 ```
 
 e.g.
 ```
-./gustle index --output data/test_query.gus data/test_query.fa.gz 
-./gustle genotype --cgst data/test.cgst --index data/test_query.gus data/test_cgst.fa
+./gustle index --cgst data/test.cgst --output data/test_query.gus data/test_query.fa.gz 
+./gustle genotype --index data/test_query.gus data/test_cgst.fa
 ```
 
 ### Output Format
@@ -59,7 +59,9 @@ The gene names are the sorted list of genes in alleles.fq.gz, unless a CGST file
 * Bernie Pope
 
 ### TODO
+* equality check should support multiple allele match
 * command line argument for dealing with missing alleles N or 0?
 * populate cgst
 * list, get, index subcommands
+* tests
 * tests

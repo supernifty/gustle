@@ -48,7 +48,7 @@ type AlleleResult map[string]bool
 // GenomeAlleleResult maps gene to list of allele names
 type GenomeAlleleResult map[GeneName]AlleleResult
 
-// stringToHash gives a 32-bit hash of a string
+// stringToHash returns a 32-bit hash of a string
 func stringToHash(s string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(s))
@@ -293,7 +293,7 @@ func LoadIndex(source string, verbose bool) QueryList {
 		checkResult(err)
 		result.Index[key] = val
 		count++
-		if count%1000 == 0 {
+		if count%10000 == 0 {
 			logm("INFO", fmt.Sprintf("processing: loaded %v items", count), false)
 		}
 		// logm("DEBUG", fmt.Sprintf("last key: %v, values: %v", key, len(val)), verbose)
@@ -343,14 +343,14 @@ func FindAlleles(db QueryList, mismatches int, genomes []string, verbose bool) {
 		searchSequence(content.String(), db, result, verbose, false)
 		searchSequence(string(reverseComplement(content)), db, result, verbose, true)
 		logm("INFO", fmt.Sprintf("done genome: %s. %v lines. %v sequences.", genomeFilename, lines, sequenceCount), verbose)
-		writeResults(genomeFilename, result, db.Cgst.GeneNames, db.Cgst.Ids)
+		writeResults(genomeFilename, result, db.Cgst)
 	}
 	logm("INFO", "find alleles: done", verbose)
 }
 
-func writeResults(filename string, result GenomeAlleleResult, cgstGeneNames []string, cgstIds map[uint32]string) {
-	genomeAlleles := make([]string, 0, len(cgstGeneNames))
-	for _, gene := range cgstGeneNames {
+func writeResults(filename string, result GenomeAlleleResult, cgst CGST) { 
+	genomeAlleles := make([]string, 0, len(cgst.GeneNames))
+	for _, gene := range cgst.GeneNames {
 		alleles, ok := result[GeneName(gene)]
 		if ok {
 			genomeAlleles = append(genomeAlleles, joinAlleles(alleles))
@@ -358,12 +358,19 @@ func writeResults(filename string, result GenomeAlleleResult, cgstGeneNames []st
 			genomeAlleles = append(genomeAlleles, "N")
 		}
 	}
-	alleles := strings.Join(genomeAlleles, "\t")
 	// see if it matches a cgstId
-	// TODO need more than just a perfect match
-	cgstId, ok := cgstIds[stringToHash(alleles)]
+	alleles := strings.Join(genomeAlleles, "\t")
+	/*
+	cgstId, ok := cgst.FindFirst(genomeAlleles)
 	if !ok {
 		cgstId = NO_CGST
 	}
-	fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", filename, cgstId, alleles) // filename, cgST, alleles
+	*/
+	cgstId, matches := cgst.FindBest(genomeAlleles)
+	if matches == len(alleles) {
+		fmt.Fprintf(os.Stdout, "%s\t%s\t%s\n", filename, cgstId, alleles) // filename, cgST, alleles
+	} else {
+		fmt.Fprintf(os.Stdout, "%s\t%s (%v/%v)\t%s\n", filename, cgstId, matches, len(alleles), alleles) // filename, cgST, alleles
+	}
+
 }
