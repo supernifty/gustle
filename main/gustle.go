@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	VERSION           = "0.1"
+	VERSION           = "0.2.1"
 	DEFAULT_SEED_SIZE = 16
 )
 
@@ -81,17 +81,17 @@ func main() {
 	}
 
 	switch os.Args[1] {
-	case "list":
-		list(os.Args[2:])
-	case "get":
-		get(os.Args[2:])
-	case "index":
-		index(os.Args[2:])
-	case "genotype":
-		doGenotype(os.Args[2:])
-	case "version":
-		version()
-	default:
-		showUsage()
+		case "list":
+			list(os.Args[2:])
+		case "get":
+			get(os.Args[2:])
+		case "index":
+			index(os.Args[2:])
+		case "genotype":
+			doGenotype(os.Args[2:])
+		case "version":
+			version()
+		default:
+			showUsage()
 	}
 }

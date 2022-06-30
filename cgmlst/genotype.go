@@ -179,7 +179,6 @@ func IndexSequences(sequences []string, cgstFilename string, seedSize int, verbo
 			scanner = bufio.NewScanner(file)
 		}
 
-
 		// index sequences
 		for scanner.Scan() {
 			line := scanner.Text()
