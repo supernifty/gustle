@@ -46,12 +46,12 @@ cd ~/gustle/data
    second-test_genome_2.fa > second-test.summary.tsv
 cat second-test.summary.tsv
 ```
-| Filename | cgST | geneA | geneB | geneC | geneD |
-| ----------------------- | -------------- | ------- | -- | ----- |
-| second-test_cgst.fa | 8675309 (4/8) | 0 | 0 | 1 | 16 |
-| second-test_genome.fa | 8675309 (3/14) | 0,16,32 | 0 | N | 16 |
-| second-test_genome_2.fa | 8675309 (3/14) | 16,32,0 | 0 | N | 16 |
 
+| Filename | cgST | geneA | geneB | geneC | geneD |
+| --- | --- | --- | --- | --- |--- |
+| *second-test_cgst.fa* | 8675309 (4/8) | 0 | 0 | 1 | 16 |
+| *second-test_genome.fa* | 8675309 (3/14) | 0,16,32 | 0 | N | 16 |
+| *second-test_genome_2.fa* | 8675309 (3/14) | 16,32,0 | 0 | N | 16 |
 
 ### Output Format
 The output is TSV, one line per genome.
