@@ -26,11 +26,32 @@ Perform gMLST genotyping with the specified genome FASTA file against the specif
 gustle genotype [--verbose] --index alleles.gus genome1.fa [genome2.fa...]
 ```
 
-e.g.
+* e.g. use data/test*
 ```
 ./gustle index --cgst data/test.cgst --output data/test_query.gus data/test_query.fa.gz 
 ./gustle genotype --index data/test_query.gus data/test_cgst.fa
 ```
+
+* e.g. use data/second-test*
+```
+cd ~/gustle/data
+../gustle index \
+   --cgst second-test.cgst \
+   --output second-test_query.gus \
+   second-test_query.fa
+../gustle genotype \
+   --index second-test_query.gus \
+   second-test_cgst.fa \
+   second-test_genome.fa \
+   second-test_genome_2.fa > second-test.summary.tsv
+cat second-test.summary.tsv
+```
+| Filename | cgST | geneA | geneB | geneC | geneD |
+| ----------------------- | -------------- | ------- | -- | ----- |
+| second-test_cgst.fa | 8675309 (4/8) | 0 | 0 | 1 | 16 |
+| second-test_genome.fa | 8675309 (3/14) | 0,16,32 | 0 | N | 16 |
+| second-test_genome_2.fa | 8675309 (3/14) | 16,32,0 | 0 | N | 16 |
+
 
 ### Output Format
 The output is TSV, one line per genome.
